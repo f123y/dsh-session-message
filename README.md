@@ -33,8 +33,8 @@ The plugin is a plain dependency of your profile (not a bundle), enabled through
 patch layer. From your profile directory (or with the dsh CLI):
 
 ```bash
-# from GitHub
-dsh plugin --profile web add github:f123y/dsh-session-message
+# from GitHub (pnpm 9+ requires -w to add into the workspace root)
+dsh plugin --profile web add -w github:f123y/dsh-session-message
 
 # or from a local checkout while developing
 dsh plugin --profile web add -w /path/to/dsh-session-message
@@ -52,6 +52,10 @@ Then enable it in `$DSH_HOME/profiles/web/cordis.patch.yml`:
 
 Restart `dsh web`. Agents created after the plugin loads get the tools; already-running
 sessions pick them up after a restart.
+
+> Note: a fresh profile also works — `dsh plugin --profile <name> add -w github:f123y/dsh-session-message`
+> initializes the profile and installs the plugin; the insert above is all that is needed
+> afterwards. Verified end-to-end on a fresh profile (pnpm 9.1.4, Windows).
 
 ### Config
 
