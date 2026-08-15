@@ -29,18 +29,23 @@ Failure codes are a closed union: `invalid_args`, `session_not_found`, `agent_no
 
 ## Install
 
+Prerequisites: `dsh` CLI on PATH, and `pnpm` installed globally (`npm i -g pnpm`)
+— the `dsh plugin` command forwards to pnpm.
+
 The plugin is a plain dependency of your profile (not a bundle), enabled through the
-patch layer. From your profile directory (or with the dsh CLI):
+patch layer:
 
 ```bash
-# from GitHub (pnpm 9+ requires -w to add into the workspace root)
+# 1. install from GitHub (pnpm 9+ requires -w to add into the workspace root;
+#    the flag is harmless on pnpm 8)
 dsh plugin --profile web add -w github:f123y/dsh-session-message
 
-# or from a local checkout while developing
+#    ...or from a local checkout while developing
 dsh plugin --profile web add -w /path/to/dsh-session-message
 ```
 
-Then enable it in `$DSH_HOME/profiles/web/cordis.patch.yml`:
+2. Enable it in `$DSH_HOME/profiles/web/cordis.patch.yml` (replace `web` with your
+   profile name if you use a different one):
 
 ```yaml
 - insert:
@@ -50,12 +55,16 @@ Then enable it in `$DSH_HOME/profiles/web/cordis.patch.yml`:
         framing: true
 ```
 
-Restart `dsh web`. Agents created after the plugin loads get the tools; already-running
-sessions pick them up after a restart.
+   Note: a freshly initialized profile's `cordis.patch.yml` ends with a placeholder
+   line `[]` — **replace** that line with the insert entry above; appending after it
+   makes the file invalid YAML and the profile will fail to boot.
 
-> Note: a fresh profile also works — `dsh plugin --profile <name> add -w github:f123y/dsh-session-message`
-> initializes the profile and installs the plugin; the insert above is all that is needed
-> afterwards. Verified end-to-end on a fresh profile (pnpm 9.1.4, Windows).
+3. Restart `dsh web`. Agents created after the plugin loads get the tools;
+   already-running sessions pick them up after a restart.
+
+There is no GUI switch to add a plugin entry — the patch file edit in step 2 is
+required (the settings page only lists the current entries). Verified end-to-end on a
+fresh profile (pnpm 9.1.4, Windows).
 
 ### Config
 
