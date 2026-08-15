@@ -24,16 +24,18 @@ and can reply back with the same tool, forming a cross-session conversation.
 
 | 工具 Tool | 说明 Description |
 | --- | --- |
-| `session_message_send(target_session, content)` | 向另一个在线会话投递一条消息，目标 agent 在下一轮处理。成功返回 `{ delivered: true, target_session, message_id }`，失败返回 `{ delivered: false, code, message }`。Deliver a message to another live session; the target agent picks it up in its next turn. |
-| `session_message_list()` | 列出所有在线会话：会话 id、标题（如有）、agent 状态（`idle`/`running`）、是否为当前会话。发送前先用它确认目标 id。List all live sessions (id, title, status, current) to discover targets. |
+| `session_message_send(target_session, content)` | 向另一个会话投递一条消息（支持在线和已持久化的会话，自动 resume 目标）。Deliver a message to another session (supports live and persisted sessions; auto-resumes the target). |
+| `session_message_list()` | 列出所有会话（在线 + 已持久化）：会话 id、标题（如有）、agent 状态（`idle`/`running`）、是否为当前会话、是否在线。List ALL sessions (live + persisted). |
+| `session_message_create(first_message?)` | 创建新会话（自动启动 agent），可选首条消息。Create a new session with an agent, optionally with a first message. |
 
-失败码为封闭集合 / Failure codes are a closed union：`invalid_args`、`session_not_found`、`agent_not_live`、`aborted`。
+失败码为封闭集合 / Failure codes are a closed union：`invalid_args`、`session_not_found`、`agent_not_live`、`resume_failed`、`create_failed`、`aborted`。
 
 ### 工作原理 / How it works
 
 - 插件在 `agent/created` 时向每个 agent 的 scoped 上下文注册上述两个工具（与 `@deepseek-ai/dsh-schedule` 同一模式）。On `agent/created`, the two tools are registered into each agent's scoped context (same pattern as `@deepseek-ai/dsh-schedule`).
 - 投递走目标 agent 的 inbox 队列（`agent.followup`）：先在目标会话日志中持久化 `agent/inbox/spliced`，目标循环 claim 后以 `user/message`（`surfaceOp: append`）追加并响应。Delivery goes through the target agent's inbox (`agent.followup`): an `agent/inbox/spliced` event is durably appended first, then the target's loop appends it as a `user/message` before responding.
 - 不打断目标正在进行的回合，消息可持久化、可恢复。Delivery never interrupts an in-flight turn, and messages survive restarts.
+- **新功能**：发送到已持久化但未打开的会话时，自动 resume 目标（加载 + 启动 agent）后再投递。**New**: sending to a persisted (not open) session auto-resumes it before delivery.
 
 ### 安装 / Install
 
@@ -82,10 +84,11 @@ dsh plugin --profile web add -w github:f123y/dsh-session-message
 2. 在 A 中对 agent 说：*"用 `session_message_list` 看看有哪些会话，然后把「请检查一下 B 任务的进度」发给会话 B。"* Ask A's agent to list sessions and send a message to B.
 3. A 投递成功，B 的 agent 收到消息并开始处理、回复。A delivers; B receives and responds.
 4. 在 B 中让 agent 用 `session_message_send` 回信，形成对话闭环。B can reply back with the same tool.
+5. 也可用 `session_message_create` 创建一个新会话并自动投递首条消息。Use `session_message_create` to create a new session with a first message.
 
 ### 限制 / Limitations
 
-- **目标必须是在线会话**：只有当前打开（有 agent 在跑）的会话能收到消息；发往关闭的会话返回 `session_not_found` / `agent_not_live`，不会静默丢失。**Target must be a live session** — sending to a closed session returns an explicit error.
+- 发送到已持久化但未打开的会话时，会自动 resume 目标（加载 + 启动 agent），需等待几秒。Sending to a persisted (not open) session auto-resumes it — expect a few seconds delay.
 - 允许发给自己（echo）。Sending to yourself is allowed.
 - 工具描述、README 均为中英双语。Tool descriptions and README are bilingual (中文 + English).
 
@@ -100,7 +103,7 @@ dsh-session-message/
 ```
 
 - 修改 `lib/index.js` 无需构建；如果 profile 用 `link:` 安装，改完重启 `dsh web` 即生效。No build step; `link:` installs pick up changes on restart.
-- 仅使用公开 harness API：`ctx.agents` / `ctx.sessions` / `agent.followup` 与 `@deepseek-ai/dsh-tools` 的 `defineTool`。Uses only public harness APIs.
+- 仅使用公开 harness API：`ctx.agents` / `ctx.sessions` / `ctx.sessionPersistence` / `agent.followup` 与 `@deepseek-ai/dsh-tools` 的 `defineTool`。Uses only public harness APIs.
 - npm 包名 `dsh-session-message` 尚未被占用，未来可 `npm publish` 以便 `dsh plugin --profile web add dsh-session-message` 直接安装。The npm name is unclaimed — publishing later enables direct registry installs.
 
 ---
@@ -111,16 +114,18 @@ dsh-session-message/
 
 | Tool | Description |
 | --- | --- |
-| `session_message_send(target_session, content)` | Deliver a message to another live session. The target agent picks it up in its next turn. Returns `{ delivered: true, target_session, message_id }` on success, or `{ delivered: false, code, message }` on failure. |
-| `session_message_list()` | List all live sessions: `session_id`, optional title, agent status (`idle`/`running`), and whether it is the current session. Call this first to discover target ids. |
+| `session_message_send(target_session, content)` | Deliver a message to another session (supports live and persisted sessions; auto-resumes the target). |
+| `session_message_list()` | List ALL sessions (live + persisted): id, title, status, current, live flag. |
+| `session_message_create(first_message?)` | Create a new session with an agent, optionally with a first message. |
 
-Failure codes are a closed union: `invalid_args`, `session_not_found`, `agent_not_live`, `aborted`.
+Failure codes are a closed union: `invalid_args`, `session_not_found`, `agent_not_live`, `resume_failed`, `create_failed`, `aborted`.
 
 ### How it works
 
 - On `agent/created`, the plugin registers the two tools into each agent's scoped context (same pattern as `@deepseek-ai/dsh-schedule`).
 - Delivery goes through the target agent's inbox (`agent.followup`): an `agent/inbox/spliced` event is durably appended to the target session's log; the target's loop claims the message and appends it as a `user/message` (`surfaceOp: append`) before responding.
 - Delivery never interrupts the target's in-flight turn, and messages survive restarts.
+- **New**: sending to a persisted (not open) session auto-resumes it before delivery.
 
 ### Install
 
@@ -163,10 +168,11 @@ There is no GUI switch to add a plugin entry — the patch file edit in step 2 i
 2. In session A, ask the agent: *"Use `session_message_list` to see live sessions, then send '请检查一下 B 任务的进度' to session B."*
 3. Session A's agent delivers the message; session B's agent receives it and responds.
 4. In session B, ask the agent to reply via `session_message_send` — a conversation loop.
+5. Use `session_message_create` to create a new session with a first message.
 
 ### Limitations
 
-- **Target must be a live session**: only sessions currently open (with a running agent) can receive messages. Sending to a closed session returns `session_not_found` / `agent_not_live` — nothing is silently dropped.
+- **Sending to a persisted (not open) session auto-resumes it** — the target is loaded from disk, an agent is started, and the message is delivered. Expect a few seconds delay.
 - Sending to yourself is allowed (echo).
 - Tool descriptions and README are bilingual (中文 + English).
 
@@ -181,7 +187,7 @@ dsh-session-message/
 ```
 
 - Edit `lib/index.js`; no build step. If your profile installs the plugin via `link:`, changes apply without re-installing — just restart `dsh web`.
-- The plugin uses only public harness APIs: `ctx.agents` / `ctx.sessions` / `agent.followup` and `defineTool` from `@deepseek-ai/dsh-tools`.
+- The plugin uses only public harness APIs: `ctx.agents` / `ctx.sessions` / `ctx.sessionPersistence` / `agent.followup` and `defineTool` from `@deepseek-ai/dsh-tools`.
 - The npm package name `dsh-session-message` is unclaimed — `npm publish` can be added later so users can `dsh plugin --profile web add dsh-session-message`.
 
 ---
