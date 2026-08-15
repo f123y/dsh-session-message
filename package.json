@@ -1,0 +1,27 @@
+{
+  "name": "dsh-session-message",
+  "version": "0.1.0",
+  "description": "DSH plugin: let agents in different sessions send messages to each other.",
+  "type": "module",
+  "main": "lib/index.js",
+  "files": [
+    "lib"
+  ],
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "plugin",
+    "session",
+    "message",
+    "cross-session"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/f123y/dsh-session-message.git"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6"
+  }
+}
