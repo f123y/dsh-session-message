@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-message",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DSH plugin: let agents in different sessions send messages to each other.",
   "type": "module",
   "main": "lib/index.js",
@@ -22,7 +22,7 @@
     "url": "git+https://github.com/f123y/dsh-session-message.git"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
-    "@deepseek-ai/dsh-agent": "0.1.0-rc.6"
+    "@deepseek-ai/dsh-tools": "0.1.6-alpha.1",
+    "@deepseek-ai/dsh-agent": "0.1.6-alpha.1"
   }
 }
