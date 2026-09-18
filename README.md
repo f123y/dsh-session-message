@@ -4,7 +4,8 @@ DSH（DeepSeek Harness）跨会话消息插件。
 
 让不同会话（session）之间的 agent 互相发送消息。在一个会话里让 agent 调用 `session_message_send`，消息会投递到目标会话，目标会话的 agent 会把它当作一条新的用户消息，在下一轮开始处理并回复；它也可以再用 `session_message_send` 回信，形成跨会话对话。
 
-> 兼容性：在 `dsh` / `@deepseek-ai/dsh-*` **0.1.0-rc.6** 上测试通过。
+> 兼容性：在 `dsh` / `@deepseek-ai/dsh-*` **0.1.6-alpha.1** 上测试通过。
+> （0.1.0-rc.6 请使用本插件的 0.1.0 版本）
 
 ---
 
@@ -12,19 +13,20 @@ DSH（DeepSeek Harness）跨会话消息插件。
 
 | 工具 | 说明 |
 | --- | --- |
-| `session_message_send(target_session, content)` | 向另一个会话投递一条消息（支持在线和已持久化的会话，自动 resume 目标）。成功返回 `{ delivered: true, target_session, message_id }`，失败返回 `{ delivered: false, code, message }`。 |
-| `session_message_list()` | 列出所有会话（在线 + 已持久化）：会话 id、标题（如有）、agent 状态（`idle`/`running`）、是否为当前会话、是否在线、分组信息。 |
-| `session_message_create(first_message?, group?)` | 创建新会话（自动启动 agent，自动归入当前工作区），可选首条消息和分组名称。 |
+| `session_message_send(target_session, content)` | 向另一个会话投递一条消息（支持在线和已持久化的会话，自动 resume 目标）。可选 `priority: "immediate"` 在目标当前回合的下一步注入，更快。成功返回 `{ delivered: true, target_session, message_id }`，失败返回 `{ delivered: false, code, message }`。 |
+| `session_message_list()` | 列出所有会话（在线 + 已持久化，经 `ctx.sessionQuery` 统一获取）：会话 id、标题（如有）、agent 状态（`idle`/`running`）、是否为当前会话、是否在线、分组信息。 |
+| `session_message_create(first_message?, group?)` | 创建新会话（自动启动 agent、继承调用方预设的完整工具集、自动归入当前工作区），可选首条消息和分组名称。 |
 
 失败码：`invalid_args`、`session_not_found`、`agent_not_live`、`resume_failed`、`create_failed`、`aborted`。
 
 ## 工作原理
 
 - 插件在 `agent/created` 时向每个 agent 的 scoped 上下文注册上述三个工具（与 `@deepseek-ai/dsh-schedule` 同一模式）。
-- 投递走目标 agent 的 inbox 队列（`agent.followup`）：先在目标会话日志中持久化 `agent/inbox/spliced`，目标循环 claim 后以 `user/message`（`surfaceOp: append`）追加并响应。
+- 投递走目标 agent 的 inbox 队列：默认 `agent.followup`（下一轮），`priority: "immediate"` 时用 `agent.steer`（当前回合的下一步）。先在目标会话日志中持久化 `agent/inbox/spliced`，目标循环 claim 后以 `user/message`（`surfaceOp: append`）追加并响应。
 - 不打断目标正在进行的回合，消息可持久化、可恢复。
 - 发送到已持久化但未打开的会话时，自动 resume 目标（加载 + 启动 agent）后再投递。
-- 创建新会话时自动附加到当前工作区（workspace），不会出现在"未分组"。
+- 创建新会话时用 `agentPresets.composeFrom()` 绑定调用方**同一份 standing composition**（同一代插件实例与工具注册），并安装 model selection，使系统提示的 `{{provider}}`/`{{model}}` 变量可解析。
+- 新会话自动附加到当前工作区（workspace），不会出现在"未分组"。
 - 分组信息持久化到 `$DSH_HOME/storages/session-message-groups.json`，重启不丢失。
 
 ## 安装
@@ -73,14 +75,14 @@ dsh plugin --profile web add -w /path/to/dsh-session-message
 
 ```
 dsh-session-message/
-├── package.json      # ESM；依赖 @deepseek-ai/dsh-tools（锁定 0.1.0-rc.6）
+├── package.json      # ESM；依赖 @deepseek-ai/dsh-tools + dsh-agent（锁定 0.1.6-alpha.1）
 ├── lib/index.js      # 插件本体：name / inject / apply + 工具实现
 ├── LICENSE           # MIT
 └── README.md
 ```
 
 - 修改 `lib/index.js` 无需构建；如果 profile 用 `link:` 安装，改完重启 `dsh web` 即生效。
-- 仅使用公开 harness API：`ctx.agents` / `ctx.sessions` / `ctx.sessionPersistence` / `ctx.workspaceRegistry` / `agent.followup` 与 `@deepseek-ai/dsh-tools` 的 `defineTool`。
+- 仅使用公开 harness API：`ctx.agents` / `ctx.sessions` / `ctx.sessionQuery`（统一列出在线+持久化会话）/ `ctx.workspaceRegistry` / `ctx.agentPresets`（`composeFrom` 继承父会话 composition）/ `agent.followup`/`agent.steer` 与 `@deepseek-ai/dsh-tools` 的 `defineTool`。
 - npm 包名 `dsh-session-message` 尚未被占用，未来可 `npm publish` 以便直接安装。
 
 ## License
