@@ -17,12 +17,14 @@ DSH（DeepSeek Harness）跨会话消息插件。
 | `session_message_list(query?, limit?, live_only?)` | 列出会话（在线 + 已持久化，经 `ctx.sessionQuery` 统一获取），**最新在前，默认最多 30 条**（上限 200）：会话 id、标题（含已持久化会话，批量折叠）、工作目录 `cwd`、创建时间、`origin`、agent 状态（`idle`/`running`）、是否当前会话/在线/已持久化、分组信息。`query` 对 id/标题/cwd/分组做不区分大小写的子串过滤；`live_only: true` 只列在线会话。 |
 | `session_message_create(title?, first_message?, group?)` | 创建新会话（自动启动 agent、继承调用方预设的完整工具集、自动归入当前工作区），可选：`title` 设置**自定义显示标题**——侧栏里显示的名字，经 session-title 服务钉住，之后自动起名不会覆盖（还可在 GUI 里再改名）；`first_message` 同时投递首条消息；`group` 指定分组。成功返回 `{ created: true, session_id, title? }`。注意 `title`（会话显示名）与 `group`（插件私有分组标注）是两回事。 |
 
+| `session_message_queue(target_session)` | 查看**其他会话要排队处理的消息**：`next_turn`（排到下一轮的普通消息）与 `next_step`（`priority: "immediate"` 插进当前步骤的紧急消息）两条有序列表，附 agent 状态与 `pending_count` 总数；每条只含发送方与前 120 字预览。派活前先用它判断该正常排队还是插队。只对在线会话有意义——离线会话收件箱未挂载，返回 `live: false` 并附说明。数据来自 harness 的 `sessionProjections` 服务 `inbox` 投影（由 `agent/inbox/spliced` 日志事件重建的持久队列）。 |
+
 失败码：`invalid_args`、`session_not_found`、`agent_not_live`、`resume_failed`、`create_failed`、`aborted`。
 
 ## 工作原理
 
-- 插件在 `agent/created` 时向每个 agent 的 scoped 上下文注册上述三个工具（与 `@deepseek-ai/dsh-schedule` 同一模式，含 WeakSet 去重与停机防护）。
-- 投递走目标 agent 的 inbox 队列：默认 `agent.followup`（下一轮），`priority: "immediate"` 时用 `agent.steer`（当前回合的下一步）。先在目标会话日志中持久化 `agent/inbox/spliced`，目标循环 claim 后以 `user/message`（`surfaceOp: append`）追加并响应。
+- 插件在 `agent/created` 时向每个 agent 的 scoped 上下文注册上述四个工具（与 `@deepseek-ai/dsh-schedule` 同一模式，含 WeakSet 去重与停机防护）。
+- 投递走目标 agent 的 inbox 队列：默认 `agent.followup`（下一轮），`priority: "immediate"` 时用 `agent.steer`（当前回合的下一步）。先在目标会话日志中持久化 `agent/inbox/spliced`，目标循环 claim 后以 `user/message`（`surfaceOp: append`）追加并响应。队列状态经 `sessionProjections.stateOf(session, "inbox")` 可查——这正是 `session_message_queue` 的数据来源。
 - 不打断目标正在进行的回合，消息可持久化、可恢复。
 - 发送到已持久化但未打开的会话时，自动 resume 目标（加载 + 启动 agent）后再投递。**model selection 与 agent preset 一律在 `setup` 回调内安装**（resume 返回时循环已启动，事后安装有时序窗口）；模型路由优先取目标会话自己日志里记录的那份（部署默认模型 → 调用方路由仅作兜底），预设缺失时挂载默认预设——跨会话投递**不会**把发送方的模型强加给目标，也不会让目标丢掉自己的工具组合。
 - 创建新会话时用 `agentPresets.composeFrom()` 绑定调用方**同一份 standing composition**（同一代插件实例与工具注册），并安装 model selection，使系统提示的 `{{provider}}`/`{{model}}` 变量可解析；创建前确保 `cwd` 目录存在，创建后若被中止会 dispose 掉已创建的 agent，不留孤儿会话。指定 `title` 时经 `sessionTitle.rename()` 以 user 来源追加 `session/title` 事件并**钉住**标题（后续自动起名不再触发，GUI 可再改名；改名失败只告警、回退自动起名）。
@@ -62,7 +64,7 @@ dsh plugin --profile web add -w /path/to/dsh-session-message
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `framing` | `true` | 投递时在消息前附加归属框架（`[跨会话消息 来自会话 <id> / Cross-session message from session <id>]`），提示目标把它当作普通消息而非指令。设为 `false` 时原样投递。 |
-| `includeSubagents` | `true` | `false` 时只给顶层 agent（`ctx.agents.roots()`）注册工具，子 agent（subagent）不再获得这三个工具。 |
+| `includeSubagents` | `true` | `false` 时只给顶层 agent（`ctx.agents.roots()`）注册工具，子 agent（subagent）不再获得这四个工具。 |
 
 ## 使用示例
 
