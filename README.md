@@ -17,7 +17,7 @@ DSH（DeepSeek Harness）跨会话消息插件。
 | `session_message_list(query?, limit?, live_only?)` | 列出会话（在线 + 已持久化，经 `ctx.sessionQuery` 统一获取），**最新在前，默认最多 30 条**（上限 200）：会话 id、标题（含已持久化会话，批量折叠）、工作目录 `cwd`、创建时间、`origin`、agent 状态（`idle`/`running`）、是否当前会话/在线/已持久化、分组信息。`query` 对 id/标题/cwd/分组做不区分大小写的子串过滤；`live_only: true` 只列在线会话。 |
 | `session_message_create(title?, first_message?, group?)` | 创建新会话（自动启动 agent、继承调用方预设的完整工具集、自动归入当前工作区），可选：`title` 设置**自定义显示标题**——侧栏里显示的名字，经 session-title 服务钉住，之后自动起名不会覆盖（还可在 GUI 里再改名）；`first_message` 同时投递首条消息；`group` 指定分组。成功返回 `{ created: true, session_id, title? }`。注意 `title`（会话显示名）与 `group`（插件私有分组标注）是两回事。 |
 
-| `session_message_queue(target_session)` | 查看**其他会话要排队处理的消息**：`next_turn`（排到下一轮的普通消息）与 `next_step`（`priority: "immediate"` 插进当前步骤的紧急消息）两条有序列表，附 agent 状态与 `pending_count` 总数；每条只含发送方与前 120 字预览。派活前先用它判断该正常排队还是插队。只对在线会话有意义——离线会话收件箱未挂载，返回 `live: false` 并附说明。数据来自 harness 的 `sessionProjections` 服务 `inbox` 投影（由 `agent/inbox/spliced` 日志事件重建的持久队列）。 |
+| `session_message_queue(target_session, action?, message_id?, queue?)` | 查看**并管理**其他会话要排队处理的消息：`next_turn`（排到下一轮的普通消息）与 `next_step`（`priority: "immediate"` 插进当前步骤的紧急消息）两条有序列表，附 agent 状态与 `pending_count` 总数；每条只含发送方与前 120 字预览（插件消息自动剥掉框架头直取内容）。`action: "view"`（默认）只查看；`"remove"` 按 `message_id` 撤下一条待处理消息；`"promote"` 把 `next_turn` 里的一条提到 `next_step` 队首（人工插队）；`"clear"` 清空队列（`queue` 可选 `next_turn`/`next_step`/`both`，默认 both）。变更写 `agent/inbox/spliced` 事件、立即持久化，返回改后的队列视图。只对在线会话有意义——离线会话收件箱未挂载，返回 `live: false` 并附说明。数据来自 harness 的 `sessionProjections` 服务 `inbox` 投影。 |
 
 失败码：`invalid_args`、`session_not_found`、`agent_not_live`、`resume_failed`、`create_failed`、`aborted`。
 
