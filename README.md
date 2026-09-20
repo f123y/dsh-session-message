@@ -21,6 +21,12 @@ DSH（DeepSeek Harness）跨会话消息插件。
 
 失败码：`invalid_args`、`session_not_found`、`agent_not_live`、`resume_failed`、`create_failed`、`aborted`。
 
+## 项目组编排（Playbooks）
+
+想让多个会话组成项目组干活？看 [playbooks/](playbooks/README.md)：一套「项目经理 + 工人会话」
+提示词模板——PM 会话吃下 goal 后自动建组、拆任务、派活、验收、催办；附**开发**与**渗透测试**
+（仅限授权场景）两个实例包，含工人守则、急件写法、静默失联巡检等实战铁律。
+
 ## 工作原理
 
 - 插件在 `agent/created` 时向每个 agent 的 scoped 上下文注册上述四个工具（与 `@deepseek-ai/dsh-schedule` 同一模式，含 WeakSet 去重与停机防护）。
