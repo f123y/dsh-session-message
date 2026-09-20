@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-message",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "DSH plugin: let agents in different sessions send messages to each other.",
   "type": "module",
   "main": "lib/index.js",

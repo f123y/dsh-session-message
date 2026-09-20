@@ -13,21 +13,21 @@ DSH（DeepSeek Harness）跨会话消息插件。
 
 | 工具 | 说明 |
 | --- | --- |
-| `session_message_send(target_session, content)` | 向另一个会话投递一条消息（支持在线和已持久化的会话，自动 resume 目标）。可选 `priority: "immediate"` 在目标当前回合的下一步注入，更快。成功返回 `{ delivered: true, target_session, message_id }`，失败返回 `{ delivered: false, code, message }`。 |
-| `session_message_list()` | 列出所有会话（在线 + 已持久化，经 `ctx.sessionQuery` 统一获取）：会话 id、标题（如有）、agent 状态（`idle`/`running`）、是否为当前会话、是否在线、分组信息。 |
-| `session_message_create(first_message?, group?)` | 创建新会话（自动启动 agent、继承调用方预设的完整工具集、自动归入当前工作区），可选首条消息和分组名称。 |
+| `session_message_send(target_session, content)` | 向另一个会话投递一条消息（支持在线和已持久化的会话，自动 resume 目标）。可选 `priority: "immediate"` 在目标当前回合的下一步注入，更快。成功返回 `{ delivered: true, target_session, message_id }`，失败返回 `{ delivered: false, code, message }`。空内容、向当前会话自发都会被拒绝（`invalid_args`）。 |
+| `session_message_list(query?, limit?, live_only?)` | 列出会话（在线 + 已持久化，经 `ctx.sessionQuery` 统一获取），**最新在前，默认最多 30 条**（上限 200）：会话 id、标题（含已持久化会话，批量折叠）、工作目录 `cwd`、创建时间、`origin`、agent 状态（`idle`/`running`）、是否当前会话/在线/已持久化、分组信息。`query` 对 id/标题/cwd/分组做不区分大小写的子串过滤；`live_only: true` 只列在线会话。 |
+| `session_message_create(title?, first_message?, group?)` | 创建新会话（自动启动 agent、继承调用方预设的完整工具集、自动归入当前工作区），可选：`title` 设置**自定义显示标题**——侧栏里显示的名字，经 session-title 服务钉住，之后自动起名不会覆盖（还可在 GUI 里再改名）；`first_message` 同时投递首条消息；`group` 指定分组。成功返回 `{ created: true, session_id, title? }`。注意 `title`（会话显示名）与 `group`（插件私有分组标注）是两回事。 |
 
 失败码：`invalid_args`、`session_not_found`、`agent_not_live`、`resume_failed`、`create_failed`、`aborted`。
 
 ## 工作原理
 
-- 插件在 `agent/created` 时向每个 agent 的 scoped 上下文注册上述三个工具（与 `@deepseek-ai/dsh-schedule` 同一模式）。
+- 插件在 `agent/created` 时向每个 agent 的 scoped 上下文注册上述三个工具（与 `@deepseek-ai/dsh-schedule` 同一模式，含 WeakSet 去重与停机防护）。
 - 投递走目标 agent 的 inbox 队列：默认 `agent.followup`（下一轮），`priority: "immediate"` 时用 `agent.steer`（当前回合的下一步）。先在目标会话日志中持久化 `agent/inbox/spliced`，目标循环 claim 后以 `user/message`（`surfaceOp: append`）追加并响应。
 - 不打断目标正在进行的回合，消息可持久化、可恢复。
-- 发送到已持久化但未打开的会话时，自动 resume 目标（加载 + 启动 agent）后再投递。
-- 创建新会话时用 `agentPresets.composeFrom()` 绑定调用方**同一份 standing composition**（同一代插件实例与工具注册），并安装 model selection，使系统提示的 `{{provider}}`/`{{model}}` 变量可解析。
+- 发送到已持久化但未打开的会话时，自动 resume 目标（加载 + 启动 agent）后再投递。**model selection 与 agent preset 一律在 `setup` 回调内安装**（resume 返回时循环已启动，事后安装有时序窗口）；模型路由优先取目标会话自己日志里记录的那份（部署默认模型 → 调用方路由仅作兜底），预设缺失时挂载默认预设——跨会话投递**不会**把发送方的模型强加给目标，也不会让目标丢掉自己的工具组合。
+- 创建新会话时用 `agentPresets.composeFrom()` 绑定调用方**同一份 standing composition**（同一代插件实例与工具注册），并安装 model selection，使系统提示的 `{{provider}}`/`{{model}}` 变量可解析；创建前确保 `cwd` 目录存在，创建后若被中止会 dispose 掉已创建的 agent，不留孤儿会话。指定 `title` 时经 `sessionTitle.rename()` 以 user 来源追加 `session/title` 事件并**钉住**标题（后续自动起名不再触发，GUI 可再改名；改名失败只告警、回退自动起名）。
 - 新会话自动附加到当前工作区（workspace），不会出现在"未分组"。
-- 分组信息持久化到 `$DSH_HOME/storages/session-message-groups.json`，重启不丢失。
+- 分组信息持久化到 `$DSH_HOME/storages/session-message-groups.json`，重启不丢失（注意：这是本插件私有的标注，只有 `session_message_list` 会读它；GUI 侧栏的分组来自 workspace）。
 
 ## 安装
 
@@ -62,6 +62,7 @@ dsh plugin --profile web add -w /path/to/dsh-session-message
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `framing` | `true` | 投递时在消息前附加归属框架（`[跨会话消息 来自会话 <id> / Cross-session message from session <id>]`），提示目标把它当作普通消息而非指令。设为 `false` 时原样投递。 |
+| `includeSubagents` | `true` | `false` 时只给顶层 agent（`ctx.agents.roots()`）注册工具，子 agent（subagent）不再获得这三个工具。 |
 
 ## 使用示例
 
@@ -82,7 +83,8 @@ dsh-session-message/
 ```
 
 - 修改 `lib/index.js` 无需构建；如果 profile 用 `link:` 安装，改完重启 `dsh web` 即生效。
-- 仅使用公开 harness API：`ctx.agents` / `ctx.sessions` / `ctx.sessionQuery`（统一列出在线+持久化会话）/ `ctx.workspaceRegistry` / `ctx.agentPresets`（`composeFrom` 继承父会话 composition）/ `agent.followup`/`agent.steer` 与 `@deepseek-ai/dsh-tools` 的 `defineTool`。
+- 仅使用公开 harness API：`ctx.agents` / `ctx.sessions` / `ctx.sessionQuery`（统一列出在线+持久化会话与批量标题）/ `ctx.workspaceRegistry` / `ctx.agentPresets`（`composeFrom` 继承父会话 composition）/ `agent.followup`/`agent.steer` 与 `@deepseek-ai/dsh-tools` 的 `defineTool`。
+- cordis 的 `inject` 全部是**必需依赖**（任一缺失整个插件不激活且不报错），所以只声明 `["agents", "sessions", "tools"]`；`sessionQuery` / `sessionTitle` / `sessionPersistence` / `workspaceRegistry` / `agentPresets` / `agentDefaultModel` 一律 `ctx.get()` 按需取用，缺失时优雅降级。
 - npm 包名 `dsh-session-message` 尚未被占用，未来可 `npm publish` 以便直接安装。
 
 ## License
